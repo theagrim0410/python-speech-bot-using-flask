@@ -2,13 +2,14 @@ import datetime
 import webbrowser
 import speech_recognition as sr
 import pyttsx3
-import google.generativeai as genai
-import yt_dlp
-import requests
 import os
 import shutil
-import numpy as np
+import requests
 import cv2
+import yt_dlp
+import google.generativeai as genai
+import numpy as np
+import time
 
 
 def say(text):
@@ -17,7 +18,14 @@ def say(text):
     engine.setProperty('rate', 150)
     engine.setProperty('volume', 1.0)
     voices = engine.getProperty('voices')
-    engine.setProperty('voice', voices[1].id)
+    # Choose a voice safely (not all systems have multiple voices)
+    try:
+        if len(voices) > 1:
+            engine.setProperty('voice', voices[1].id)
+        else:
+            engine.setProperty('voice', voices[0].id)
+    except Exception:
+        pass
     engine.say(text)
     engine.runAndWait()
 
@@ -26,6 +34,9 @@ def take():
 
     r = sr.Recognizer()
     with sr.Microphone() as source:
+        # Shorter ambient noise adjustment to reduce wait time; tune as needed
+        r.adjust_for_ambient_noise(source, duration=0.6)
+        r.pause_threshold = 0.6
         print("Listening...")
         try:
             audio = r.listen(source)
@@ -59,7 +70,12 @@ def wishme():
 def chat():
 
     try:
-        genai.configure(api_key="AIzaSyB0sGG0nbpqotG0NXzDi50KteUp7mGD3-A")
+        # Read API key from environment for security and flexibility
+        api_key = 'AIzaSyAoTnkF1HJ8e4Am9uOV_NPEvWAnXeBcl4w'
+        if not api_key:
+            say("Chat unavailable: API key not configured.")
+            return
+        genai.configure(api_key=api_key)
         model = genai.GenerativeModel("gemini-2.0-flash")
         chat_session = model.start_chat(history=[])
 
@@ -87,7 +103,7 @@ def playsongs(query):
         ydl_opts = {
 
             "quiet": True,
-            "default_search": "ytsearch",
+            "default_search": "ytsearch1",
             "noplaylist": True,
             "nocheckcertificate": True,
             "ignoreerrors": True,
@@ -100,11 +116,17 @@ def playsongs(query):
                 video_url = info["entries"][0]["webpage_url"]
                 say(f"Sir wait playing {query} song")
 
-                # Update if needed
-                brave_path = "C:/Program Files/BraveSoftware/Brave-Browser/Application/brave.exe"
-                webbrowser.register(
-                    "brave", None, webbrowser.BackgroundBrowser(brave_path))
-                webbrowser.get("brave").open(video_url)
+                # Try opening in the default browser; fallback to Brave if that fails
+                try:
+                    webbrowser.open(video_url)
+                except Exception:
+                    brave_path = "C:/Program Files/BraveSoftware/Brave-Browser/Application/brave.exe"
+                    try:
+                        webbrowser.register(
+                            "brave", None, webbrowser.BackgroundBrowser(brave_path))
+                        webbrowser.get("brave").open(video_url)
+                    except Exception:
+                        say("Unable to open browser for the song.")
 
             else:
                 say("Sorry sir this song is not found")
@@ -114,16 +136,40 @@ def playsongs(query):
     return
 
 
+# Wake word configuration
+WAKE_WORDS = ["hii lalli", "hi lalli", "hello", "hey lalli", "hii lali"]
+
+
+def take_command(timeout=6, phrase_time_limit=6):
+    """Listen for a single command after wake word. Returns lowercased text or empty string."""
+    r = sr.Recognizer()
+    with sr.Microphone() as source:
+        try:
+            audio = r.listen(source, timeout=timeout, phrase_time_limit=phrase_time_limit)
+            command = r.recognize_google(audio, language='en-in')
+            print(f"Command heard: {command}")
+            return command.lower()
+        except sr.UnknownValueError:
+            say("Sorry, I couldn't understand. Please try again.")
+            return ""
+        except sr.RequestError:
+            say("Network error. Please check your connection.")
+            return ""
+        except Exception:
+            return ""
+
+
 def google(query):
-    say("searching s")
+    say("Searching on Google")
     search_url = f"https://www.google.com/search?q={query.replace(' ', '+')}"
-    webbrowser.open(search_url)
+    webbrowser.open_new_tab(search_url)
     return
 
 
 def weather(city):
     try:
-        api_weather = "7f3c63f98ed248e5a4271257252002"
+        # Allow using an environment variable for the weather API key
+        api_weather =  '7f3c63f98ed248e5a4271257252002'
         url_weather = "http://api.weatherapi.com/v1/current.json"
         params = {
             "key": api_weather,
@@ -155,7 +201,7 @@ def weather(city):
 def app(app_name):
 
     if "calculator" in app_name:
-        app_path = "calc.exe"  # update if needed
+        app_path = "calc.exe"  
     else:
         app_path = shutil.which(app_name)
 
@@ -190,8 +236,7 @@ def face():
                 cv2.rectangle(roi_color,(ex,ey),(ex+ew,ey+eh),(0,255,0),2)
 
         cv2.imshow('img',img)
-        if cv2.waitKey(1) & 0xFF == ord('q'): 
-            requests.get("http://127.0.0.1:5000/shutdown")
+        if cv2.waitKey(1) & 0xFF == ord('q'):
             break
 
     cap.release()
@@ -200,149 +245,174 @@ def face():
     
     
 def main():
+    """Run as a background wake-word listener. The assistant stays idle until the wake word is heard,
+    then listens for a single command, handles it, and returns to sleep.
+    """
+    say("Lalli is running in background. Say 'Hii Lalli' to activate me.")
 
-    say("Hello, I am Lalli, the A I i am here to assist you")
+    r = sr.Recognizer()
+    mic = sr.Microphone()
+
+    # Calibrate once at start
+    with mic as source:
+        r.adjust_for_ambient_noise(source, duration=0.6)
 
     while True:
-        text = take()
+        # Wait for wake word
+        print("Waiting for wake word...")
+        try:
+            with mic as source:
+                audio = r.listen(source, timeout=None, phrase_time_limit=4)
+            try:
+                heard = r.recognize_google(audio, language='en-in').lower()
+            except Exception:
+                continue
 
-        if not text:
-            continue
+            print(f"Heard (wake loop): {heard}")
+            if any(w in heard for w in WAKE_WORDS):
+                say("Yes sir, I'm listening.")
 
-        if "open" in text: # open instagram
-            word = text.split()
-            if len(word) > 1:
-                website = "".join(word[1:])
+                # Get the actual command
+                cmd = take_command()
+                if not cmd:
+                    continue
 
-            say(f"Opening {website}")
-            webbrowser.open(f"https://www.{website}.com")
-            site_found = True
-            requests.get("http://127.0.0.1:5000/shutdown")
-            break
+                # Basic command handling (non-exhaustive)
+                if "open" in cmd:
+                    parts = cmd.split()
+                    if len(parts) > 1:
+                        website = "".join(parts[1:])
+                        say(f"Opening {website}")
+                        webbrowser.open(f"https://www.{website}.com")
 
-        elif "the time" in text: #the time lalli
-            current_time = datetime.datetime.now().strftime("%H:%M:%S")
-            say(f"Sir, the time is {current_time}")
+                elif "the time" in cmd:
+                    current_time = datetime.datetime.now().strftime("%H:%M:%S")
+                    say(f"Sir, the time is {current_time}")
 
-        elif "let us talk" in text: #let us talk lalli
-            say("Yes sir, let's begin.")
-            chat()
+                elif "let us talk" in cmd or "chat" in cmd:
+                    say("Yes sir, let's begin.")
+                    chat()
 
-        elif "what is your name" in text: # what is your name
-            say("Sir, my name is  Lalli developed by agrim saxena")
+                elif "what is your name" in cmd:
+                    say("Sir, my name is Lalli, developed by Agrim Saxena")
 
-        elif "wish me" in text: #wish me lalli
-            wishme()
+                elif "wish me" in cmd:
+                    wishme()
 
-        elif "show my songs" in text: #show my song lalli
-            say("okey sir showing")
-            webbrowser.open(
-                "https://open.spotify.com/playlist/44kMHX5eWfaJmtHab86mBm")
-            requests.get("http://127.0.0.1:5000/shutdown")
-            break
+                elif "show my songs" in cmd:
+                    say("Okay sir, showing your songs")
+                    webbrowser.open("https://open.spotify.com/playlist/44kMHX5eWfaJmtHab86mBm")
 
-        elif "play" in text: #play tum hi ho
-            word = text.split()
-            if len(word) > 1:
-                song = " ".join(word[1:])
+                elif "play" in cmd:
+                    parts = cmd.split()
+                    song = " ".join(parts[1:]) if len(parts) > 1 else "songs"
+                    playsongs(song)
 
-            else:
-                song = "songs"
+                elif "search" in cmd:
+                    parts = cmd.split()
+                    if len(parts) > 1:
+                        prompt = " ".join(parts[1:])
+                        google(prompt)
+                    else:
+                        say("Sir, what should I search?")
 
-            playsongs(song)
-            requests.get("http://127.0.0.1:5000/shutdown")
-            break
+                elif "weather" in cmd or "temperature" in cmd or "tempreture" in cmd:
+                    parts = cmd.split()
+                    if len(parts) > 1:
+                        # assume city is last words
+                        city = " ".join(parts[1:])
+                        weather(city)
+                    else:
+                        say("Sir, tell the city name")
 
-        elif "search" in text: #search apple in google
-            word = text.split()
-            if len(word) > 2:
-                prompt = " ".join(word[1:-2])
-                google(prompt)
-                requests.get("http://127.0.0.1:5000/shutdown")
-                break
-            else:
-                say("sir what to search")
+                elif "app" in cmd or "application" in cmd:
+                    parts = cmd.split()
+                    if len(parts) > 1:
+                        app_name = " ".join(parts[1:])
+                        app(app_name)
+                    else:
+                        say("Sir, application not found")
 
-        elif "weather" in text or "tempreture" in text: #weather in bareilly
-            word = text.split()
-            if len(word) > 2:
-                city = " ".join(word[2:])
-                weather(city)
-            else:
-                say("sir tell the city name")
+                elif "detect me" in cmd:
+                    say("Sir detecting you, to close press q")
+                    face()
 
-        elif "app" in text or "application" in text: #application calculator
-            word = text.split()
-            if len(word) > 1:
-                app_name = " ".join(word[1:])
-                app(app_name)
-                requests.get("http://127.0.0.1:5000/shutdown")
-                break
-            else:
-                say("sir application not found")
-                
-        elif "detect me" in text: #detect me lalli
-            say("Sir detecting you ,to close press q")
-            face()
-            requests.get("http://127.0.0.1:5000/shutdown")
-            break
-        
-        # add 2 and 3 lalli
-        
-        elif "add" in text: 
-            word = text.split()
-            if len(word) == 4:
-                num1 = int(word[1])
-                num2 = int(word[3])
-                say(f"Sir the sum is {str(num1+num2)}")
-            else:
-                say("wrong inputs")
-        elif "subtract" in text:
-            word = text.split()
-            if len(word) == 4:
-                num1 = int(word[1])
-                num2 = int(word[3])
-                say(f"Sir the difference is {str(num1-num2)}")
-            else:
-                say("wrong inputs")
-        elif "multiply" in text:
-            word = text.split()
-            if len(word) == 4:
-                num1 = int(word[1])
-                num2 = int(word[3])
-                say(f"Sir the multiplication is {str(num1*num2)}")
-            else:
-                say("wrong inputs")
-            say(str(num1+num2))
-        elif "divide" in text:
-            word = text.split()
-            if len(word) == 4:
-                num1 = int(word[1])
-                num2 = int(word[3])
-                if num2 == 0:
-                    say("sorry cannot divide")
-                elif num2 != 0:
-                    say(f"Sir the division is {str(num1//num2)}")
-            else:
-                say("wrong inputs")
+                elif "add" in cmd:
+                    parts = cmd.split()
+                    if len(parts) == 4:
+                        try:
+                            num1 = int(parts[1]); num2 = int(parts[3])
+                            say(f"Sir the sum is {str(num1+num2)}")
+                        except Exception:
+                            say("Wrong inputs")
+                    else:
+                        say("Wrong inputs")
 
-        elif "what you can do" in text: #what you can do lalli
-            say('''I Can do many things 
-            1 i can open a website
-            2 i can tell my name
-            3 i can chat with you as chat bot
-            4 i can open the applications
-            5 i can play any songs
-            6 i can wish you
-            7 i can tell the weather conditions
-            8 i can do simple calculations of four main operations
-            9 i can tell you the current time
-            10 i can search on google
-            ''')
+                elif "subtract" in cmd:
+                    parts = cmd.split()
+                    if len(parts) == 4:
+                        try:
+                            num1 = int(parts[1]); num2 = int(parts[3])
+                            say(f"Sir the difference is {str(num1-num2)}")
+                        except Exception:
+                            say("Wrong inputs")
+                    else:
+                        say("Wrong inputs")
 
-        elif "exit please" in text: #exit please yar
-            say("Okay sir, exiting.")
-            requests.get("http://127.0.0.1:5000/shutdown")
+                elif "multiply" in cmd:
+                    parts = cmd.split()
+                    if len(parts) == 4:
+                        try:
+                            num1 = int(parts[1]); num2 = int(parts[3])
+                            say(f"Sir the multiplication is {str(num1*num2)}")
+                        except Exception:
+                            say("Wrong inputs")
+                    else:
+                        say("Wrong inputs")
+
+                elif "divide" in cmd:
+                    parts = cmd.split()
+                    if len(parts) == 4:
+                        try:
+                            num1 = int(parts[1]); num2 = int(parts[3])
+                            if num2 == 0:
+                                say("Sorry cannot divide")
+                            else:
+                                say(f"Sir the division is {str(num1//num2)}")
+                        except Exception:
+                            say("Wrong inputs")
+                    else:
+                        say("Wrong inputs")
+
+                elif "what you can do" in cmd:
+                    say('''I can do many things:
+                    1. Open a website
+                    2. Tell my name
+                    3. Chat with you as a chatbot
+                    4. Open applications
+                    5. Play songs
+                    6. Wish you
+                    7. Tell weather conditions
+                    8. Do simple calculations
+                    9. Tell the current time
+                    10. Search on Google
+                    ''')
+
+                elif "exit please" in cmd or "exit" == cmd.strip():
+                    say("Okay sir, exiting.")
+                    # terminate this assistant process; Flask will continue running
+                    try:
+                        os._exit(0)
+                    except Exception:
+                        break
+
+                else:
+                    say("Sorry sir, I didn't understand that. Please say the command again.")
+
+                # after handling command, go back to waiting for wake word
+                time.sleep(0.5)
+
+        except KeyboardInterrupt:
             break
 
 
