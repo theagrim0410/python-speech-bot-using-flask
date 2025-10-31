@@ -248,7 +248,7 @@ def main():
     """Run as a background wake-word listener. The assistant stays idle until the wake word is heard,
     then listens for a single command, handles it, and returns to sleep.
     """
-    say("Lalli is running in background. Say 'Hii Lalli' to activate me.")
+    say("Hii Sir , need magical words to activate me.")
 
     r = sr.Recognizer()
     mic = sr.Microphone()

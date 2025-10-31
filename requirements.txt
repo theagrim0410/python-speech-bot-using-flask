@@ -1,0 +1,12 @@
+datetime
+webbrowser
+speechrecognition
+pyttsx3
+requests
+opencv-python
+yt-dlp
+google-generativeai
+numpy
+flask
+opencv-python
+pyaudio
