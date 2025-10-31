@@ -1,5 +1,3 @@
-datetime
-webbrowser
 speechrecognition
 pyttsx3
 requests
