@@ -1,4 +1,3 @@
-<<<<<<< HEAD
 import datetime
 import webbrowser
 import speech_recognition as sr
